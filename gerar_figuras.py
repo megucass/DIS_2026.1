@@ -18,6 +18,7 @@ Rode depois de bench_throughput.py (para existir o throughput.json).
 import json
 import os
 import shutil
+from datetime import datetime
 
 import matplotlib
 matplotlib.use("Agg")
@@ -50,17 +51,25 @@ def _matriz(h_csv):
     return _cache_H[h_csv]
 
 
-def salvar_exato(f, caminho_png, titulo, wpx, hpx):
-    """Salva a imagem reconstruida com tamanho EXATO de wpx x hpx pixels."""
+def salvar_exato(f, caminho_png, titulo, wpx, hpx, algoritmo, inicio, fim, iteracoes):
+    """Salva a imagem reconstruida com tamanho EXATO de wpx x hpx pixels, com
+    a ficha tecnica exigida (algoritmo, inicio, fim, pixels, iteracoes)
+    impressa no rodape da propria figura."""
     lado = int(round(np.sqrt(len(f))))
+    pixels = lado * lado
     img = np.abs(f).reshape((lado, lado), order="F")     # ordem Fortran (igual ao gabarito)
     fig = plt.figure(figsize=(wpx / DPI, hpx / DPI), dpi=DPI)
-    ax = fig.add_axes([0.10, 0.10, 0.86, 0.82])          # margens fixas para tamanho exato
+    # margens com mais espaco embaixo para caber a ficha tecnica (tamanho da
+    # figura continua EXATO: wpx x hpx, so' a area do eixo fica um pouco menor)
+    ax = fig.add_axes([0.10, 0.17, 0.86, 0.75])
     ax.imshow(img, cmap="gray", origin="upper", aspect="equal")
     ax.set_title(titulo)
     passo = max(5, lado // 6)
     ax.set_xticks(np.arange(0, lado + 1, passo))
     ax.set_yticks(np.arange(0, lado + 1, passo))
+    ficha = (f"algoritmo={algoritmo} | pixels={pixels} ({lado}x{lado}) | iteracoes={iteracoes}\n"
+             f"inicio={inicio} | fim={fim}")
+    fig.text(0.5, 0.02, ficha, ha="center", va="bottom", fontsize=6.5, family="monospace")
     fig.savefig(caminho_png, dpi=DPI)                    # SEM bbox_inches -> tamanho exato
     plt.close(fig)
 
@@ -70,18 +79,24 @@ def reconstrucoes():
     for sinal, gab, h_csv, w, h, chave, rotulo in RECONS:
         H = _matriz(h_csv)
         g = alg.aplicar_ganho(alg.carregar_sinal(os.path.join(DATA, sinal)))
+        inicio = datetime.now().isoformat(timespec="milliseconds")
         f, iters = alg.cgnr(g, H)
+        fim = datetime.now().isoformat(timespec="milliseconds")
         salvar_exato(f, os.path.join(IMG, f"rec_{chave}.png"),
-                     f"CGNR {rotulo}  ({iters} iter)", w, h)
+                     f"CGNR {rotulo}  ({iters} iter)", w, h,
+                     algoritmo="CGNR", inicio=inicio, fim=fim, iteracoes=iters)
         if gab:
             shutil.copy(os.path.join(DATA, gab), os.path.join(IMG, f"gab_{chave}.png"))
         print(f"rec_{chave}.png ({w}x{h})", "+ gabarito" if gab else "(sem gabarito)")
     # um exemplo de CGNE (para a secao do algoritmo), mesmo tamanho
     H = _matriz("H-2.csv")
     g = alg.aplicar_ganho(alg.carregar_sinal(os.path.join(DATA, "g-30x30-1.csv")))
+    inicio = datetime.now().isoformat(timespec="milliseconds")
     f, iters = alg.cgne(g, H)
+    fim = datetime.now().isoformat(timespec="milliseconds")
     salvar_exato(f, os.path.join(IMG, "rec_cgne_30x30.png"),
-                 f"CGNE 30x30 nº1  ({iters} iter)", 1120, 840)
+                 f"CGNE 30x30 nº1  ({iters} iter)", 1120, 840,
+                 algoritmo="CGNE", inicio=inicio, fim=fim, iteracoes=iters)
     print("rec_cgne_30x30.png")
 
 

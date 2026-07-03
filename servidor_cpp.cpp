@@ -15,9 +15,16 @@
 //        GEMV da propria OpenBLAS.
 //
 // Assim conseguimos mostrar os dois cenarios na apresentacao.
+//
+// Protocolo (identico ao servidor Python):
+//   PEDIDO   ->  "ALGORITMO TAMANHO\n"  +  TAMANHO doubles (g)
+//   RESPOSTA <-  "ALGO_CPP|inicio|fim|iteracoes|pixels|tempo_ms\n" + pixels doubles (f)
+//             ou, se a rotina de controle de saturacao recusar o pedido:
+//   RESPOSTA <-  "SATURADO|motivo\n"   (sem corpo)
 
 #include <winsock2.h>          // sockets no Windows (Winsock)
 #include <ws2tcpip.h>
+#include <windows.h>           // GlobalMemoryStatusEx (rotina de controle de saturacao)
 #ifdef USAR_BLAS
 #include <openblas/cblas.h>    // OpenBLAS: a mesma BLAS usada pelo NumPy
 #else
@@ -124,6 +131,12 @@ void axpy(double alpha, const std::vector<double> &x, std::vector<double> &y) {
 
 // ---------------------------------------------------------------------------
 // ALGORITMO CGNE
+//
+// NOTA sobre o erro: o enunciado define e = ||r_(i+1)|| - ||r_i|| (sem
+// modulo). Como a norma do residuo do CG e' nao-crescente, isso pararia
+// sempre na 1a iteracao. Usamos |e| = std::abs(...) - a MAGNITUDE da
+// variacao entre iteracoes - para o criterio funcionar como descrito
+// (mesma decisao em algoritmos.py, ver o comentario la).
 // ---------------------------------------------------------------------------
 std::vector<double> cgne(const std::vector<double> &g, const Matriz &H,
                          int max_iter, double tol, int &iters_out) {
@@ -216,6 +229,21 @@ std::string arquivo_modelo(int64_t tamanho_g) {
 }
 
 // ---------------------------------------------------------------------------
+// ROTINA DE CONTROLE DE SATURACAO (Atividade 4 do enunciado):
+// mede a RAM fisica disponivel e recusa novas reconstrucoes quando ela esta
+// abaixo de um minimo seguro, em vez de arriscar estourar memoria (o mesmo
+// cenario testado offline em extras/simular_pouca_ram.py).
+// ---------------------------------------------------------------------------
+const double RAM_MINIMA_MB = 200.0;
+
+double ram_disponivel_mb() {
+    MEMORYSTATUSEX stat;
+    stat.dwLength = sizeof(stat);
+    GlobalMemoryStatusEx(&stat);
+    return static_cast<double>(stat.ullAvailPhys) / (1024.0 * 1024.0);
+}
+
+// ---------------------------------------------------------------------------
 // AUXILIARES DE REDE (ler exatamente N bytes / ler uma linha de texto)
 // ---------------------------------------------------------------------------
 bool receber_n(SOCKET s, char *buf, int n) {
@@ -277,6 +305,18 @@ void atender(SOCKET conn) {
     if (!receber_n(conn, reinterpret_cast<char *>(g.data()),
                    static_cast<int>(tamanho * 8)))
         return;
+
+    // 2.5) rotina de controle de saturacao: recusa o pedido se a RAM livre
+    // estiver abaixo do minimo seguro
+    double livre = ram_disponivel_mb();
+    if (livre < RAM_MINIMA_MB) {
+        char msg[160];
+        std::snprintf(msg, sizeof(msg), "SATURADO|RAM livre %.0fMB < minimo %.0fMB\n",
+                      livre, RAM_MINIMA_MB);
+        enviar_tudo(conn, msg, static_cast<int>(std::strlen(msg)));
+        std::cout << "[servidor-cpp] " << msg << std::flush;
+        return;
+    }
 
     // 3) carrega a matriz (so na 1a vez) e reconstroi
     std::string caminho = arquivo_modelo(tamanho);

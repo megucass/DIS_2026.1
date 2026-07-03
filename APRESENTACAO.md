@@ -76,6 +76,16 @@ Em `algoritmos.py → coeficiente_regularizacao()`.
 É a **variação da norma do resíduo** entre duas iterações. Quando ela fica
 muito pequena, o algoritmo já não está melhorando — então paramos.
 
+> **Por que o módulo?** O enunciado define `ε = ||r(i+1)||₂ − ||r(i)||₂`,
+> **sem** as barras de módulo. Como a norma do resíduo do CG é **não-crescente**,
+> essa diferença "crua" é quase sempre `≤ 0` — e o critério pararia **sempre
+> na 1ª iteração**, o que contradiz o próprio enunciado (rodar até 10
+> iterações) e o comportamento documentado abaixo (10 iterações com ganho).
+> Por isso implementamos `|ε|` — a **magnitude** da variação — em
+> `algoritmos.py` e em `servidor_cpp.cpp` (mesma decisão nos dois, comentada
+> no código). É a leitura que faz o critério funcionar como o restante do
+> enunciado descreve.
+
 ### Ganho de sinal `γ` (aplicado pelo cliente)
 
 Embora `g` seja um vetor de `S·N` valores na equação `g = H·f`, para aplicar o
@@ -211,14 +221,16 @@ O enunciado exige que **cada imagem** registre no mínimo:
 | Tamanho em pixels | `pixels` (900 = 30×30, 3600 = 60×60) |
 | Número de iterações | `iteracoes` |
 
-Tudo isso viaja na resposta do servidor e cai direto no relatório
-(`relatorios/relatorio.md`). Exemplo ilustrativo do formato gerado — os números
-exatos mudam a cada execução:
+Tudo isso viaja na resposta do servidor **e é impresso dentro do próprio
+PNG** (rodapé da figura, gerado por `algoritmos.py → salvar_imagem()`), além
+de cair no relatório (`relatorios/relatorio.md`), que agora também traz um
+link para a imagem de cada linha. Exemplo ilustrativo do formato gerado — os
+números exatos mudam a cada execução:
 
-| # | sinal | algoritmo | ganho | pixels | iter | início | fim | solver (ms) |
-|--:|-------|-----------|:-----:|-------:|:----:|--------|-----|------------:|
-| 1 | A-30x30-1.csv | CGNR_PYTHON | sim | 900 | 10 | 00:27:36.078 | 00:27:36.226 | 147.7 |
-| 5 | g-30x30-1.csv | CGNR_PYTHON | não | 900 | 2  | 00:27:37.940 | 00:27:37.973 | 32.9 |
+| # | sinal | algoritmo | ganho | pixels | iter | início | fim | solver (ms) | imagem |
+|--:|-------|-----------|:-----:|-------:|:----:|--------|-----|------------:|--------|
+| 1 | A-30x30-1.csv | CGNR_PYTHON | sim | 900 | 10 | 00:27:36.078 | 00:27:36.226 | 147.7 | [python_01_CGNR.png](relatorios/imagens/python_01_CGNR.png) |
+| 5 | g-30x30-1.csv | CGNR_PYTHON | não | 900 | 2  | 00:27:37.940 | 00:27:37.973 | 32.9 | [python_05_CGNR.png](relatorios/imagens/python_05_CGNR.png) |
 
 ---
 
@@ -229,9 +241,9 @@ exatos mudam a cada execução:
 | Requisito do enunciado | Como atendemos |
 |------------------------|----------------|
 | Enviar uma sequência de sinais **g** em intervalos de tempo aleatórios | `time.sleep(intervalo)` com `intervalo` sorteado entre 0,05 e 0,30 s |
-| Ganho e modelo definidos **aleatoriamente** | `random.choice` decide ganho (sim/não), sinal e algoritmo |
-| Relatório com todas as imagens, iterações e tempo | gera `relatorios/relatorio.md` + as imagens PNG |
-| **A mesma sequência** para as duas versões | semente fixa (`SEED = 42`) → sequência idêntica para Python e C++ |
+| Ganho e **modelo da imagem** definidos aleatoriamente | `random.choice` decide ganho (sim/não) e o sinal — a lista de sinais agora inclui os **dois modelos** (30×30 e 60×60), então o tamanho da imagem também varia por sorteio |
+| Relatório com todas as imagens, iterações e tempo | `relatorios/relatorio.md` traz uma linha por reconstrução, com **link para o PNG** de cada uma |
+| **A mesma sequência de sinais para as duas versões de algoritmos de reconstrução** | cada sinal sorteado é reconstruído **pelas duas versões, CGNE e CGNR** (não só um dos dois por sorteio) — a mesma sequência de `g` alimenta as duas; a sequência inteira também é replayed de forma idêntica (mesma semente `SEED=42`) para o servidor Python e para o C++ |
 
 ### Servidor (`servidor_python.py` e `servidor_cpp.cpp`)
 
@@ -240,9 +252,10 @@ exatos mudam a cada execução:
 | Versão em linguagem **interpretada e não fortemente tipada** | **Python** (`servidor_python.py`) |
 | Versão em linguagem **compilada e fortemente tipada** | **C++** (`servidor_cpp.cpp`) |
 | Executar o algoritmo de reconstrução | CGNE e CGNR, escolhidos pelo cliente |
-| Parar quando `ε < 10⁻⁴` **ou** chegar a 10 iterações | exatamente esse critério no laço |
+| Parar quando `ε < 10⁻⁴` **ou** chegar a 10 iterações | exatamente esse critério no laço (ver nota sobre o módulo na seção 2) |
 | Relatório comparativo das duas versões | seção "Comparação Python × C++" do relatório |
 | Reconstruir o **máximo de imagens no menor tempo** | a matriz H é carregada **uma vez** e reaproveitada |
+| Testes de saturação + rotina de controle (Atividade 4) | os dois servidores medem a **RAM física disponível** (`GlobalMemoryStatusEx`) antes de cada reconstrução; se estiver abaixo de `RAM_MINIMA_MB` (200 MB), respondem `SATURADO\|motivo` em vez de arriscar `MemoryError`/estouro. O cliente detecta essa resposta e **tenta de novo** (com espera) antes de desistir daquela reconstrução. O cenário de pouca memória já era testado offline em `extras/simular_pouca_ram.py` (256 MB de teto); agora o próprio servidor mede e reage a isso em tempo real. |
 
 Os dois servidores falam o **mesmo protocolo simples** sobre TCP (o servidor
 Python escuta em `127.0.0.1:8101` e o C++ em `127.0.0.1:8102`), então a
@@ -251,6 +264,8 @@ comparação é justa:
 ```
 PEDIDO   →  "ALGORITMO TAMANHO\n"  +  TAMANHO números (g) em binário
 RESPOSTA ←  "ALGO|início|fim|iterações|pixels|tempo_ms\n"  +  pixels números (f)
+         ou, se a rotina de controle de saturação recusar o pedido:
+RESPOSTA ←  "SATURADO|motivo\n"   (sem corpo — o cliente tenta de novo)
 ```
 
 ---
@@ -437,3 +452,10 @@ dis-novo/
     versão compilada **vence por ~20% a 30%**, atendendo ao objetivo de
     "reconstruir o maior número de imagens no menor tempo".
 - Ou seja: o C++ ganha **pelo mérito da otimização**, não por prejudicar o Python.
+- Cada imagem carrega, dentro do próprio PNG, os cinco dados exigidos
+  (algoritmo, início, fim, tamanho em pixels, iterações), e o relatório
+  linka cada reconstrução à sua imagem.
+- Os dois servidores implementam uma rotina de controle de saturação
+  (medem RAM disponível e recusam pedidos quando ela está abaixo do
+  mínimo seguro), atendendo à Atividade 4 (testes de saturação + rotina de
+  controle) em cima do próprio servidor, não só em experimento isolado.

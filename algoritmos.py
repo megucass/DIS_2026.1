@@ -97,6 +97,14 @@ def fator_reducao(H, iteracoes=20):
 #       beta  = (r_novo^T r_novo) / (r^T r)
 #       p     = H^T r_novo + beta p
 #   Para quando |erro| < tol  ou  atingir max_iter.
+#
+#   NOTA sobre o erro: o enunciado define e = ||r_(i+1)||_2 - ||r_i||_2 (sem
+#   modulo). Como a norma do residuo do CG e' nao-crescente, essa diferenca
+#   "crua" e' quase sempre <= 0 e o criterio pararia sempre na 1a iteracao,
+#   contradizendo o requisito de rodar ate 10 iteracoes. Por isso usamos
+#   |e| = abs(||r_(i+1)||_2 - ||r_i||_2): a MAGNITUDE da variacao do residuo
+#   entre iteracoes, que e' a leitura que faz o criterio de parada funcionar
+#   como descrito (ver APRESENTACAO.md, secao 2).
 def cgne(g, H, max_iter=10, tol=1e-4):
     f = np.zeros(H.shape[1])
     r = g - H @ f                  # r0  (espaco do sinal)
@@ -142,6 +150,7 @@ def cgne(g, H, max_iter=10, tol=1e-4):
 #       beta  = ||z_novo||^2 / ||z||^2
 #       p     = z_novo + beta p
 #   Para quando |erro| < tol  ou  atingir max_iter.
+#   (mesma nota do CGNE sobre o modulo em |erro| - ver acima)
 def cgnr(g, H, max_iter=10, tol=1e-4):
     f = np.zeros(H.shape[1])
     r = g - H @ f                  # r0  (espaco do sinal)
@@ -179,23 +188,36 @@ ALGORITMOS = {"CGNE": cgne, "CGNR": cgnr}
 # ----------------------------------------------------------------------
 # 6) SALVAR A IMAGEM RECONSTRUIDA  (PNG em tons de cinza)
 # ----------------------------------------------------------------------
-def salvar_imagem(f, caminho_png, titulo="ABS"):
-    """Transforma o vetor f em uma imagem quadrada e salva como PNG."""
+# O enunciado exige que CADA IMAGEM contenha, no minimo: identificacao do
+# algoritmo, data/hora de inicio, data/hora de fim, tamanho em pixels e o
+# numero de iteracoes executadas. Por isso essa "ficha tecnica" e' impressa
+# dentro do proprio PNG (nao so' no relatorio em markdown).
+def salvar_imagem(f, caminho_png, algoritmo, inicio, fim, iteracoes, titulo=None):
+    """Transforma o vetor f em uma imagem quadrada e salva como PNG, com a
+    ficha tecnica (algoritmo, inicio, fim, pixels, iteracoes) impressa
+    junto com a figura."""
     import matplotlib
     matplotlib.use("Agg")                 # backend sem janela (so salva arquivo)
     import matplotlib.pyplot as plt
 
     lado = int(round(np.sqrt(len(f))))    # 900 -> 30 ; 3600 -> 60
+    pixels = lado * lado
     # reshape em ordem "F" (coluna a coluna) para casar com a orientacao da
     # imagem de referencia, que foi gerada no MATLAB (column-major).
     img = np.abs(f).reshape((lado, lado), order="F")  # valor absoluto, como na referencia
 
-    fig, ax = plt.subplots(figsize=(5, 5))
+    fig, ax = plt.subplots(figsize=(5, 5.6))
     ax.imshow(img, cmap="gray", origin="upper")
-    ax.set_title(titulo)
+    ax.set_title(titulo or algoritmo)
     ax.set_xticks(np.arange(0, lado + 1, 5))
     ax.set_yticks(np.arange(0, lado + 1, 5))
+
+    ficha = (f"algoritmo={algoritmo}  |  pixels={pixels} ({lado}x{lado})  |  iteracoes={iteracoes}\n"
+             f"inicio={inicio}  |  fim={fim}")
+    fig.text(0.5, 0.01, ficha, ha="center", va="bottom", fontsize=7, family="monospace")
+
     os.makedirs(os.path.dirname(caminho_png) or ".", exist_ok=True)
+    fig.subplots_adjust(bottom=0.18)
     fig.savefig(caminho_png, dpi=110, bbox_inches="tight")
     plt.close(fig)
     return caminho_png

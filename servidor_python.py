@@ -11,10 +11,13 @@ Protocolo (bem simples, em cima de TCP):
     PEDIDO   ->  linha ASCII  "ALGORITMO TAMANHO\n"  +  TAMANHO doubles (g)
     RESPOSTA <-  linha ASCII  "ALGO|inicio|fim|iteracoes|num_pixels|tempo_ms\n"
                  + num_pixels doubles (imagem f)
+              ou, se a rotina de controle de saturacao recusar o pedido:
+    RESPOSTA <-  linha ASCII  "SATURADO|motivo\n"   (sem corpo)
 
 Os numeros viajam como float64 binario (rapido e exato, sem texto).
 """
 
+import ctypes
 import socket
 import time
 from datetime import datetime
@@ -44,6 +47,37 @@ def obter_matriz(tamanho_g):
         print(f"[servidor-py] carregando matriz {caminho} ...", flush=True)
         _cache[tamanho_g] = alg.carregar_matriz(caminho)
     return _cache[tamanho_g]
+
+
+# ----------------------------------------------------------------------
+# Rotina de controle de saturacao (Atividade 4 do enunciado):
+# mede a RAM disponivel no sistema e recusa novas reconstrucoes quando ela
+# esta abaixo de um minimo seguro, em vez de deixar o processo estourar
+# memoria (o mesmo cenario testado offline em extras/simular_pouca_ram.py).
+# ----------------------------------------------------------------------
+class _MEMORYSTATUSEX(ctypes.Structure):
+    _fields_ = [
+        ("dwLength", ctypes.c_ulong),
+        ("dwMemoryLoad", ctypes.c_ulong),
+        ("ullTotalPhys", ctypes.c_uint64),
+        ("ullAvailPhys", ctypes.c_uint64),
+        ("ullTotalPageFile", ctypes.c_uint64),
+        ("ullAvailPageFile", ctypes.c_uint64),
+        ("ullTotalVirtual", ctypes.c_uint64),
+        ("ullAvailVirtual", ctypes.c_uint64),
+        ("sullAvailExtendedVirtual", ctypes.c_uint64),
+    ]
+
+
+RAM_MINIMA_MB = 200   # abaixo disso, recusamos novas reconstrucoes
+
+
+def ram_disponivel_mb():
+    """RAM fisica disponivel agora, via GlobalMemoryStatusEx (Windows)."""
+    stat = _MEMORYSTATUSEX()
+    stat.dwLength = ctypes.sizeof(_MEMORYSTATUSEX)
+    ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
+    return stat.ullAvailPhys / (1024 * 1024)
 
 
 # --- funcoes auxiliares de rede (ler exatamente N bytes / ler uma linha) ---
@@ -80,6 +114,15 @@ def atender(conn):
     # 2) le o sinal g (TAMANHO doubles)
     bruto = receber_n(conn, tamanho * 8)
     g = np.frombuffer(bruto, dtype="<f8").copy()
+
+    # 2.5) rotina de controle de saturacao: recusa o pedido se a RAM livre
+    # estiver abaixo do minimo seguro, em vez de arriscar um MemoryError
+    livre = ram_disponivel_mb()
+    if livre < RAM_MINIMA_MB:
+        motivo = f"RAM livre {livre:.0f}MB < minimo {RAM_MINIMA_MB}MB"
+        conn.sendall(f"SATURADO|{motivo}\n".encode("ascii"))
+        print(f"[servidor-py] SATURADO: {motivo}", flush=True)
+        return
 
     # 3) reconstroi  (anota inicio e fim, exigidos no relatorio)
     H = obter_matriz(tamanho)
