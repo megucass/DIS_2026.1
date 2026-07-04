@@ -1,0 +1,20 @@
+{
+  "python": {
+    "tipo": "python",
+    "n": 15,
+    "ms_por_img": 141.418,
+    "throughput_img_s": 7.071235627713587
+  },
+  "cpp": {
+    "tipo": "cpp",
+    "n": 15,
+    "ms_por_img": 132.343,
+    "throughput_img_s": 7.556123104357617
+  },
+  "cpp_openmp": {
+    "tipo": "cpp_openmp",
+    "n": 15,
+    "ms_por_img": 118.271,
+    "throughput_img_s": 8.455158069180102
+  }
+}

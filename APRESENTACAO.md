@@ -1,20 +1,21 @@
-# Reconstrução de Imagem de Ultrassom — CGNE e CGNR
+# Reconstrução de Imagem de Ultrassom - CGNE e CGNR
 
-### Projeto APS — Sistemas Distribuídos (Python + C++)
+> Cássia Megumi
+>
+> Nicole Hildebrand
 
-> Termos técnicos (GEMV, BLAS, streaming, SIMD, …) e os **experimentos extras**
-> estão num documento à parte: **[EXTRAS_E_GLOSSARIO.md](EXTRAS_E_GLOSSARIO.md)** —
-> assim esta apresentação fica focada no que o enunciado pede.
+## Projeto Desenvolvimento Integrado de Sistemas (Python + C++)
 
+> Informações adicionais em: **[EXTRAS_E_GLOSSARIO.md](EXTRAS_E_GLOSSARIO.md)**
 ---
 
-## 1. Visão geral — qual é o problema?
+## 1. Visão geral
 
 Um aparelho de ultrassom emite ondas e mede o **eco** que volta em vários
-sensores. A partir desses ecos queremos **reconstruir a imagem** do que está
+sensores. A partir desses ecos, queremos **reconstruir a imagem** do que está
 dentro do corpo.
 
-Matematicamente, o problema é uma única equação:
+O problema é uma única equação:
 
 ```
 g = H · f
@@ -30,58 +31,60 @@ g = H · f
 
 O problema é que **H não pode ser invertida diretamente** (é grande e
 mal-condicionada). Por isso usamos métodos **iterativos** do Gradiente
-Conjugado — **CGNE** e **CGNR** — que chegam perto da solução passo a passo.
+Conjugado - **CGNE** e **CGNR** - que chegam perto da solução passo a passo.
 
-> **Resultado final, em uma imagem** (modelo 30×30, matriz `H` 27904×900): à
-> esquerda o gabarito de referência; à direita a imagem que o nosso código
-> reconstrói. São praticamente iguais.
+> **Resultado final** (modelo 30×30, matriz `H` 27904×900):  
+> à esquerda, o gabarito de referência; à direita a imagem que o nosso código reconstrói.
 
 | Referência (gabarito) | Nossa reconstrução (CGNR) |
 |:---------------------:|:-------------------------:|
 | ![ref](imagens/gab_g30_1.png) | ![rec](imagens/rec_g30_1.png) |
 
-*(A galeria com **todas** as reconstruções está na seção 8.)*
+*(Todas as imagens de reconstruções estão na seção 8.)*
 
 ---
 
 ## 2. Algoritmos e definições
 
-O enunciado define quatro quantidades. Escrevemos cada uma como aparece e como
-ela vira código.
-
 ### Fator de redução `c`
+
 ```
 c = || Hᵀ · H ||₂          (norma espectral = maior autovalor de Hᵀ·H)
 ```
+
 É o **maior alongamento** que o operador aplica (o maior autovalor de `Hᵀ·H`, que
 equivale ao quadrado do maior valor singular de `H`). Calculado pelo **método da
 potência** em `algoritmos.py → fator_reducao()`.
 
 ### Coeficiente de regularização `λ`
+
 ```
 λ = max( |Hᵀ · g| ) · 0,10
 ```
+
 Parâmetro de regularização (controla o quanto "suavizamos" a solução).
 Em `algoritmos.py → coeficiente_regularizacao()`.
 
-> **Onde estão `c` e `λ` nos algoritmos?** Em lugar nenhum dentro do laço — neste
+> **Onde estão `c` e `λ` nos algoritmos?** Em lugar nenhum dentro do laço - neste
 > projeto eles são calculados como o enunciado pede, mas funcionam como **métricas
 > informativas**. A regularização efetiva vem da **parada antecipada** (no máximo 10
 > iterações). Por isso você não os verá nos pseudocódigos do CGNE/CGNR (seções 3 e 4).
 
 ### Erro `ε` (critério de parada)
+
 ```
 ε = |  ||r(i+1)||₂  −  ||r(i)||₂  |
 ```
+
 É a **variação da norma do resíduo** entre duas iterações. Quando ela fica
-muito pequena, o algoritmo já não está melhorando — então paramos.
+muito pequena, o algoritmo já não está melhorando - então paramos.
 
 > **Por que o módulo?** O enunciado define `ε = ||r(i+1)||₂ − ||r(i)||₂`,
 > **sem** as barras de módulo. Como a norma do resíduo do CG é **não-crescente**,
-> essa diferença "crua" é quase sempre `≤ 0` — e o critério pararia **sempre
+> essa diferença "crua" é quase sempre `≤ 0` - e o critério pararia **sempre
 > na 1ª iteração**, o que contradiz o próprio enunciado (rodar até 10
 > iterações) e o comportamento documentado abaixo (10 iterações com ganho).
-> Por isso implementamos `|ε|` — a **magnitude** da variação — em
+> Por isso implementamos `|ε|` - a **magnitude** da variação - em
 > `algoritmos.py` e em `servidor_cpp.cpp` (mesma decisão nos dois, comentada
 > no código). É a leitura que faz o critério funcionar como o restante do
 > enunciado descreve.
@@ -97,6 +100,7 @@ para c = 1..N (sensores):
        γ_l       = 100 + (1/20) · l · √l
        g[l,c]    = g[l,c] · γ_l
 ```
+
 É o **ganho por tempo (TGC)**: amostras mais profundas (l maior) são
 amplificadas para compensar a atenuação do som. Neste dataset há **N = 64
 sensores** (27904 = 436×64 e 50816 = 794×64), então `S = tamanho_de_g / 64`.
@@ -108,27 +112,13 @@ A curva de `γ`:
 > (`||g|| ≈ 3·10⁻⁴`). O ganho multiplica o sinal por ~187×, trazendo o resíduo
 > para uma escala em que o critério `ε < 10⁻⁴` faz sentido. **Sem ganho**, o
 > resíduo já começa abaixo de `10⁻⁴` e o algoritmo para em **2 iterações**;
-> **com ganho**, ele roda as **10 iterações** completas. Isso aparece de verdade
-> no nosso relatório (seção 7).
+> **com ganho**, ele roda as **10 iterações** completas. Mais informações na seção 7.
 
 ---
 
 ## 3. Algoritmo CGNE (Conjugate Gradient Normal Error)
 
-```
-f₀ = 0
-r₀ = g − H f₀
-p₀ = Hᵀ r₀
-repetir para i = 0, 1, 2, ... :
-    α = (rᵀ r) / (pᵀ p)
-    f = f + α p
-    r = r − α (H p)
-    β = (r_novoᵀ r_novo) / (rᵀ r)
-    p = Hᵀ r_novo + β p
-até  |ε| < 10⁻⁴   ou   10 iterações
-```
-
-Em Python fica quase idêntico ao pseudocódigo (arquivo `algoritmos.py`):
+Em Python (arquivo `algoritmos.py`):
 
 ```python
 def cgne(g, H, max_iter=10, tol=1e-4):
@@ -153,23 +143,7 @@ def cgne(g, H, max_iter=10, tol=1e-4):
 
 ---
 
-## 4. Algoritmo CGNR (Conjugate Gradient Normal Residual) — Saad 2003
-
-```
-f₀ = 0
-r₀ = g − H f₀
-z₀ = Hᵀ r₀
-p₀ = z₀
-repetir para i = 0, 1, 2, ... :
-    w = H p
-    α = ||z||² / ||w||²
-    f = f + α p
-    r = r − α w
-    z_novo = Hᵀ r
-    β = ||z_novo||² / ||z||²
-    p = z_novo + β p
-até  |ε| < 10⁻⁴   ou   10 iterações
-```
+## 4. Algoritmo CGNR (Conjugate Gradient Normal Residual) - Saad 2003
 
 Em Python (arquivo `algoritmos.py`):
 
@@ -198,7 +172,7 @@ def cgnr(g, H, max_iter=10, tol=1e-4):
 
 > **CGNE × CGNR:** os dois minimizam `||g − Hf||`. O CGNE caminha no espaço da
 > imagem (Craig), o CGNR no espaço do resíduo (Saad). Na prática, isso só muda
-> **em quais vetores cada método aplica `H` e `Hᵀ`** a cada passo — o resultado
+> **em quais vetores cada método aplica `H` e `Hᵀ`** a cada passo - o resultado
 > final é o **mesmo** aqui. Abaixo, o CGNE reconstruindo a mesma cena:
 >
 > ![cgne](imagens/rec_cgne_30x30.png)
@@ -209,7 +183,7 @@ def cgnr(g, H, max_iter=10, tol=1e-4):
 
 ---
 
-## 5. Requisitos não funcionais — metadados de cada imagem
+## 5. Requisitos não funcionais - metadados de cada imagem
 
 O enunciado exige que **cada imagem** registre no mínimo:
 
@@ -224,8 +198,7 @@ O enunciado exige que **cada imagem** registre no mínimo:
 Tudo isso viaja na resposta do servidor **e é impresso dentro do próprio
 PNG** (rodapé da figura, gerado por `algoritmos.py → salvar_imagem()`), além
 de cair no relatório (`relatorios/relatorio.md`), que agora também traz um
-link para a imagem de cada linha. Exemplo ilustrativo do formato gerado — os
-números exatos mudam a cada execução:
+link para a imagem de cada linha. Exemplo do formato gerado:
 
 | # | sinal | algoritmo | ganho | pixels | iter | início | fim | solver (ms) | imagem |
 |--:|-------|-----------|:-----:|-------:|:----:|--------|-----|------------:|--------|
@@ -240,10 +213,10 @@ números exatos mudam a cada execução:
 
 | Requisito do enunciado | Como atendemos |
 |------------------------|----------------|
-| Enviar uma sequência de sinais **g** em intervalos de tempo aleatórios | `time.sleep(intervalo)` com `intervalo` sorteado entre 0,05 e 0,30 s |
-| Ganho e **modelo da imagem** definidos aleatoriamente | `random.choice` decide ganho (sim/não) e o sinal — a lista de sinais agora inclui os **dois modelos** (30×30 e 60×60), então o tamanho da imagem também varia por sorteio |
+| Enviar uma sequência de sinais **g** em intervalos de tempo aleatórios | `time.sleep(intervalo)` com `intervalo` sorteado entre 0,05s e 0,30s |
+| Ganho e **modelo da imagem** definidos aleatoriamente | `random.choice` decide ganho (sim/não) e o sinal - a lista de sinais agora inclui os **dois modelos** (30×30 e 60×60), então o tamanho da imagem também varia por sorteio |
 | Relatório com todas as imagens, iterações e tempo | `relatorios/relatorio.md` traz uma linha por reconstrução, com **link para o PNG** de cada uma |
-| **A mesma sequência de sinais para as duas versões de algoritmos de reconstrução** | cada sinal sorteado é reconstruído **pelas duas versões, CGNE e CGNR** (não só um dos dois por sorteio) — a mesma sequência de `g` alimenta as duas; a sequência inteira também é replayed de forma idêntica (mesma semente `SEED=42`) para o servidor Python e para o C++ |
+| **A mesma sequência de sinais para as duas versões de algoritmos de reconstrução** | cada sinal sorteado é reconstruído **pelas duas versões, CGNE e CGNR**, a mesma sequência de `g` alimenta as duas e tem a mesma seed para o servidor Python e para o C++ |
 
 ### Servidor (`servidor_python.py` e `servidor_cpp.cpp`)
 
@@ -265,14 +238,14 @@ comparação é justa:
 PEDIDO   →  "ALGORITMO TAMANHO\n"  +  TAMANHO números (g) em binário
 RESPOSTA ←  "ALGO|início|fim|iterações|pixels|tempo_ms\n"  +  pixels números (f)
          ou, se a rotina de controle de saturação recusar o pedido:
-RESPOSTA ←  "SATURADO|motivo\n"   (sem corpo — o cliente tenta de novo)
+RESPOSTA ←  "SATURADO|motivo\n"   (sem corpo - o cliente tenta de novo)
 ```
 
 ---
 
 ## 7. Atividades semanais
 
-### Atividade 1 — Seleção de linguagem e bibliotecas BLAS
+### Atividade 1 - Seleção de linguagem e bibliotecas BLAS
 
 | Versão | Linguagem | Álgebra linear |
 |--------|-----------|----------------|
@@ -280,14 +253,14 @@ RESPOSTA ←  "SATURADO|motivo\n"   (sem corpo — o cliente tenta de novo)
 | Compilada (a) | **C++ (g++)** | a **mesma OpenBLAS** (`cblas_dgemv`, `ddot`, `dnrm2`, `daxpy`) |
 | Compilada (b) | **C++ (g++)** | produto matriz-vetor **próprio**, paralelizado com **OpenMP** + SIMD |
 
-> **Por que duas versões em C++?** Para a comparação ser metodologicamente justa.
-> A versão (a) usa **exatamente a mesma BLAS do NumPy** (OpenBLAS 0.3.31) — então o
+> Fizemos duas versões em C++ para que a comparação seja metodologicamente justa.
+> A versão (a) usa **exatamente a mesma BLAS do NumPy** (OpenBLAS 0.3.31), então o
 > "motor" de cálculo é idêntico. A versão (b) escreve o produto matriz-vetor à mão
 > e o paraleliza com OpenMP. Ambas comparadas contra o Python **em plena
-> capacidade** — na sua configuração mais rápida, **sem nenhuma restrição artificial** (não
+> capacidade** - na sua configuração mais rápida, **sem nenhuma restrição artificial** (não
 > limitamos as threads da BLAS do NumPy). Veja os resultados na seção 8.
 
-### Atividade 2 — Teste das operações básicas
+### Atividade 2 - Teste das operações básicas
 
 Testamos `MN = M·N`, `aM = a·M` e `Ma = M·a` (dados em `data/ops/`,
 do `Dados.zip`) nas duas linguagens. Resultado:
@@ -315,10 +288,8 @@ capacidade** (sem nenhuma restrição artificial). O benchmark usa o **modelo 30
 *Cada barra é o tempo mediano por imagem de um dos três servidores (modelo 30×30);
 barra menor = mais rápido. As duas leituras abaixo explicam o resultado.*
 
-### Duas comparações, duas lições honestas
-
 **(1) Mesma BLAS → empate técnico (a prova de que a disputa é justa).**
-Quando o C++ usa a **mesma OpenBLAS do NumPy**, o motor de cálculo é idêntico — e
+Quando o C++ usa a **mesma OpenBLAS do NumPy**, o motor de cálculo é idêntico - e
 o resultado é **quase empate**: o C++ fica só uns **3% a 7%** à frente, apenas pela
 menor sobrecarga (sem interpretador, sem alocar um array novo a cada passo). Isso
 prova que **ninguém ganha por mágica da linguagem**: com o mesmo motor, empatam.
@@ -333,7 +304,7 @@ núcleos.
 
 | Servidor | Tempo/imagem (típico) | vs Python |
 |----------|:---------------------:|:---------:|
-| Python (NumPy/OpenBLAS) | ~180 ms | — |
+| Python (NumPy/OpenBLAS) | ~180 ms | - |
 | C++ (OpenBLAS, **mesma BLAS**) | ~175 ms | **~+5%** (empate) |
 | C++ (**OpenMP**, próprio) | ~140 ms | **~+25%** |
 
@@ -344,7 +315,7 @@ núcleos.
 > Python é um pouco mais lento mesmo com a mesma BLAS?* A explicação a nível baixo
 > (interpretador, alocações, GEMV) está nos **[Extras](EXTRAS_E_GLOSSARIO.md)**.
 
-### Galeria — todas as reconstruções
+### Galeria - todas as reconstruções
 
 Todas as imagens reconstruídas têm o **mesmo tamanho em pixels do gabarito**, para
 ficarem simétricas lado a lado. Onde existe gabarito mostramos os dois; os sinais
@@ -356,7 +327,7 @@ ficarem simétricas lado a lado. Onde existe gabarito mostramos os dois; os sina
 |-------|:--------:|:-------------------------:|
 | `g-30x30-1` | ![](imagens/gab_g30_1.png) | ![](imagens/rec_g30_1.png) |
 | `g-30x30-2` | ![](imagens/gab_g30_2.png) | ![](imagens/rec_g30_2.png) |
-| `A-30x30-1` *(sem gabarito)* | — | ![](imagens/rec_A30.png) |
+| `A-30x30-1` *(sem gabarito)* | - | ![](imagens/rec_A30.png) |
 
 **Modelo 60×60** (matriz 50816×3600)
 
@@ -364,7 +335,7 @@ ficarem simétricas lado a lado. Onde existe gabarito mostramos os dois; os sina
 |-------|:--------:|:-------------------------:|
 | `G-1` | ![](imagens/gab_G1.png) | ![](imagens/rec_G1.png) |
 | `G-2` | ![](imagens/gab_G2.png) | ![](imagens/rec_G2.png) |
-| `A-60x60-1` *(sem gabarito)* | — | ![](imagens/rec_A60.png) |
+| `A-60x60-1` *(sem gabarito)* | - | ![](imagens/rec_A60.png) |
 
 > **Extras e glossário:** a análise de baixo nível da lentidão do Python e o
 > **experimento de memória** (streaming + float32, com a **série de tetos
@@ -375,7 +346,7 @@ ficarem simétricas lado a lado. Onde existe gabarito mostramos os dois; os sina
 
 ## 9. Como executar
 
-> Rode todos os comandos **a partir da pasta do projeto** — o código procura os
+> Rode todos os comandos **a partir da pasta do projeto** - o código procura os
 > dados em `data/`.
 
 ```powershell
@@ -440,22 +411,12 @@ dis-novo/
 
 ## 11. Conclusão
 
-- Implementamos **CGNE** e **CGNR** fielmente ao enunciado, em **Python**
-  (interpretado) e **C++** (compilado), com **cliente/servidor** sobre TCP.
+- Implementamos **CGNE** e **CGNR** fielmente ao enunciado, em **Python** (interpretado) e **C++** (compilado), com **cliente/servidor** sobre TCP.
 - As reconstruções **batem com os gabaritos** nos modelos 30×30 e 60×60.
-- O critério de parada `ε < 10⁻⁴` ou 10 iterações funciona, e o **ganho de
-  sinal** mostrou ter papel central no número de iterações.
+- O critério de parada `ε < 10⁻⁴` ou 10 iterações funciona, e o **ganho de sinal** mostrou ter papel central no número de iterações.
 - Na comparação de desempenho (Python sempre em plena capacidade, sem restrições):
-  - com a **mesma BLAS** (OpenBLAS nos dois), dá **empate técnico** — prova de que
-    a disputa é justa, pois o motor de cálculo é idêntico;
-  - com o C++ **bem otimizado** (produto matriz-vetor próprio + **OpenMP**), a
-    versão compilada **vence por ~20% a 30%**, atendendo ao objetivo de
-    "reconstruir o maior número de imagens no menor tempo".
+  - com a **mesma BLAS** (OpenBLAS nos dois), dá **empate técnico** - prova de que a disputa é justa, pois o motor de cálculo é idêntico;
+  - com o C++ **bem otimizado** (produto matriz-vetor próprio + **OpenMP**), a versão compilada **vence por ~20% a 30%**, atendendo ao objetivo de "reconstruir o maior número de imagens no menor tempo".
 - Ou seja: o C++ ganha **pelo mérito da otimização**, não por prejudicar o Python.
-- Cada imagem carrega, dentro do próprio PNG, os cinco dados exigidos
-  (algoritmo, início, fim, tamanho em pixels, iterações), e o relatório
-  linka cada reconstrução à sua imagem.
-- Os dois servidores implementam uma rotina de controle de saturação
-  (medem RAM disponível e recusam pedidos quando ela está abaixo do
-  mínimo seguro), atendendo à Atividade 4 (testes de saturação + rotina de
-  controle) em cima do próprio servidor, não só em experimento isolado.
+- Cada imagem carrega, dentro do próprio PNG, os cinco dados exigidos (algoritmo, início, fim, tamanho em pixels, iterações), e o relatório linka cada reconstrução à sua imagem.
+- Os dois servidores implementam uma rotina de controle de saturação (medem RAM disponível e recusam pedidos quando ela está abaixo do mínimo seguro), atendendo à Atividade 4 (testes de saturação + rotina de controle) em cima do próprio servidor, não só em experimento isolado.

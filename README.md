@@ -1,12 +1,12 @@
 # Reconstrução de Imagem de Ultrassom (CGNE / CGNR)
 
-Projeto APS de Sistemas Distribuídos: reconstrução de imagem de ultrassom com
-**duas versões do servidor** — **Python** (interpretada) e **C++** (compilada).
+Projeto de reconstrução de imagem de ultrassom com
+**duas versões do servidor** - **Python** (interpretada) e **C++** (compilada).
 
-**Comece pela apresentação: [APRESENTACAO.md](APRESENTACAO.md)** — o trabalho:
+**Comece pela apresentação: [APRESENTACAO.md](APRESENTACAO.md)** - o trabalho:
 algoritmos, requisitos, resultados (com todas as imagens reconstruídas).
 
-**Extras + glossário: [EXTRAS_E_GLOSSARIO.md](EXTRAS_E_GLOSSARIO.md)** — a análise
+**Extras + glossário: [EXTRAS_E_GLOSSARIO.md](EXTRAS_E_GLOSSARIO.md)** - a análise
 de baixo nível, o experimento de memória (tetos agressivos) e o dicionário de
 termos (GEMV, BLAS, …). Os experimentos extra ficam na subpasta `extras/`.
 
